@@ -8,18 +8,22 @@ mkdir -p META-INF/com/google/android
 cp ../assets/updater-script .
 unzip -q dl_rom.zip META-INF/com/google/android/update-binary
 mv META-INF/com/google/android/update-binary .
-echo "Extracting boot.img .. "
-unzip -q dl_rom.zip boot.img
+if [ ! -f boot.img ]; then
+  echo "Extracting boot.img .. "
+  unzip -q dl_rom.zip boot.img
+fi
 
 #DO_SKIP_PATCHING_UPDATER_SCRIPT=1
 #DO_SKIP_UPLOADING_ZIP_FILE=1
 
 if [ -z "$DO_SKIP_PATCHING_UPDATER_SCRIPT" ]; then
 
-  # patch updater-script of full ROM
-  echo "Updating stock ROM .. "
-  cp updater-script META-INF/com/google/android
-  zip -q -u dl_rom.zip META-INF/com/google/android/updater-script
+  if [ ! -f "system.img.ext4" ]; then
+    # patch updater-script of full ROM
+    echo "Updating stock ROM .. "
+    cp updater-script META-INF/com/google/android
+    zip -q -u dl_rom.zip META-INF/com/google/android/updater-script
+  fi
 
   # move out modem related files
   if [ ! -d firmware-update ]; then
@@ -60,7 +64,12 @@ fi # DO_SKIP_PATCHING_UPDATER_SCRIPT
 if [ -z "$DO_SKIP_UPLOADING_ZIP_FILE" ]; then
   # push files to phone
   echo "Pushing stock ROM to phone .. "
-  adb push dl_rom.zip /data/local/tmp/
+  if [ -f "system.img.ext4" ]; then
+    adb push system.img.ext4 /data/local/tmp/system.img
+    mv system.img.ext4 system.img.ext4.orig
+  else
+    adb push dl_rom.zip /data/local/tmp/
+  fi
   echo "Pushing OTA package to phone .. "
   adb push dl_ota.zip /data/local/tmp/
 fi # DO_SKIP_UPLOADING_ZIP_FILE
@@ -74,7 +83,7 @@ adb shell "chmod 755 /data/local/tmp/do_patch.sh"
 
 # do patch !
 echo "Do the work ! "
-adb shell /data/local/tmp/do_patch.sh
+adb shell su -c /data/local/tmp/do_patch.sh
 
 # pull system.img
 echo "Get boot.img and system.img.ext4 from phone .. "

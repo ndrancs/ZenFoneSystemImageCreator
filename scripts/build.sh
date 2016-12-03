@@ -16,9 +16,21 @@ add_root_survival() {
   apply_overlay root_survival
 }
 
+add_byeselinux() {
+  cp $ASSETSDIR/byeselinux/byselinux.ko $1
+}
+
+add_stop_service() {
+  apply_overlay stop_service
+}
+
 cleanup_launcher() {
   find system/vendor -name default_allapp.xml -delete
   find system/vendor -name phone_workspace.xml -exec cp $ASSETSDIR/phone_workspace.xml {} \;
+}
+
+force_adoptable_storage() {
+  echo "persist.fw.force_adoptable=true" >> system/build.prop
 }
 
 move_out_image() {
@@ -122,8 +134,10 @@ if [ ! -d system ]; then
       rm -rf $UNZIPPED_STOCK_ROM_DIR
 
       echo "Converting system.new.dat to raw ext4 image .. "
+      mv system.transfer.list system.transfer.list.orig
+      grep -v zero system.transfer.list.orig > system.transfer.list
       $SCRIPTDIR/sdat2img.py system.transfer.list system.new.dat system.img.ext4
-      rm -f system.transfer.list system.new.dat system.patch.dat
+      rm -f system.transfer.list.orig system.transfer.list system.new.dat system.patch.dat
     fi
   elif [ ! -f boot.img ]; then
     echo "Move out stock boot.img .. "
@@ -142,19 +156,17 @@ if [ ! -d system ]; then
   echo "Copy system directory .. "
   sudo cp -r mnt system  
 
-  echo "Removing SystemUpdate & DMClient by default .. "
-  mkdir -p excluded_apps/app
-  mv -f system/app/SystemUpdate excluded_apps/app
-  mv -f system/app/DMClient excluded_apps/app
+  if [ ! -z "$EXCLUDE_UPDATE" ]; then 
+    echo "Removing SystemUpdate & DMClient by default .. "
+    mkdir -p excluded_apps/app
+    mv -f system/app/SystemUpdate excluded_apps/app
+    mv -f system/app/DMClient excluded_apps/app
+  fi
   
   echo "Un-mount raw image .. "
   sudo umount mnt
   rmdir mnt
   
-#  echo "Converting ext4 to sparse image (for fastboot) .. "
-#  ./ext2simg system.img.ext4 system-origin.img
-#  rm system.img.ext4
-
   echo "Building recovery .. "
   build_recovery_from_patch
   
@@ -165,6 +177,9 @@ if [ -f system.img.ext4 ]; then
   SYSTEM_SIZE=$(stat -c%s system.img.ext4)
   echo "Update SYSTEM_SIZE to $SYSTEM_SIZE .. "
 fi
+
+#echo "Disable SELinux .. "
+#add_byeselinux system/lib/modules/adsprpc.ko
 
 echo "Install SuperSU .. "
 $SCRIPTDIR/install_supersu.sh
@@ -177,11 +192,16 @@ if [ ! -z "$SLIM_DOWN" ]; then
   echo "Enable sdcard write permission in platform.xml .. "
   $SCRIPTDIR/enable_sdcard_write.sh
   
+  echo "Clean up launcher workspace .. "
+  cleanup_launcher
+  
   echo "Install Xposed .. "
   $SCRIPTDIR/install_xposed.sh
 
-  echo "Clean up launcher workspace .. "
-  cleanup_launcher
+#  echo "Enable Adoptable Storage .. "
+#  force_adoptable_storage
+
+  add_stop_service
 fi
 
 # Set the right file_context file for SELinux permission
@@ -190,6 +210,7 @@ if [ -n "$FILE_CONTEXT" ]; then
 fi
 
 echo "Build system.img .. "
+echo $BIN_DIR/make_ext4fs -s -l $SYSTEM_SIZE -a system $FCOPT system.img system
 $BIN_DIR/make_ext4fs -s -l $SYSTEM_SIZE -a system $FCOPT system.img system
 
 echo "Finish building $VERSION .. "
